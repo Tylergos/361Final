@@ -1,3 +1,4 @@
+import random
 import sys
 
 import librosa
@@ -20,12 +21,14 @@ DATASET_PATH = "./SpeakersDataset/50_speakers_audio_data"
 PICKLE_AUDIO_FILE_PATH = "./AudioData.txt"
 PICKLE_TEXT_FILE_PATH = "./TextData.txt"
 MODEL_PATH = "model.h5"
+TRAIN_SET_PATH = "./TrainSet.txt"
 SAMPLE_RATE = 11025 // 8
 CLIP_LENGTH = 661504 // 8
 SEQUENCES_PER_CLIP = 10
 SEQUENCE_LENGTH = CLIP_LENGTH // SEQUENCES_PER_CLIP
 BATCH_SIZE = 8
 EPOCHS = 120
+RANDOM_STATE = 1234
 
 
 def read_and_save_audio(file_name: str = PICKLE_AUDIO_FILE_PATH) -> None:
@@ -50,6 +53,19 @@ def read_saved_audio(file_name: str = PICKLE_AUDIO_FILE_PATH) -> dict[list[str]]
     audio_data = pickle.load(file)
     file.close()
     return audio_data
+
+
+def save_train_set(train_set = list[list[int]], file_name: str = TRAIN_SET_PATH) -> None:
+    pickle_file = open(file_name, "wb")
+    pickle.dump(train_set, pickle_file)
+    pickle_file.close()
+
+
+def read_train_set(file_name: str = TRAIN_SET_PATH) -> list[list[int]]:
+    file = open(file_name, "rb")
+    train_set = pickle.load(file)
+    file.close()
+    return train_set
 
 
 def speech_to_text(file_name: str = PICKLE_TEXT_FILE_PATH, quick_run: bool = False) -> None:
@@ -101,6 +117,20 @@ def convert_audio_data(audio_data: dict[list[str]], clip_length: int) -> tuple[n
     return x, y
 
 
+def split_sequence(audio_data: dict[list[float]], sequence_length: int) -> dict[list[float]]:
+    sequence_data = dict()
+    for (author, data) in audio_data.items():
+        sequences = list()
+        for clip in data:
+            i = 0
+            while i + sequence_length < len(clip[0]):
+                sequences.append(clip[0][i:i + sequence_length])
+                i += sequence_length
+        sequence_data[author] = sequences
+
+    return sequence_data
+
+
 def convert_text_data(text_data: dict[list[str]]) -> tuple[np.ndarray, np.ndarray]:
     x = []
     y = []
@@ -113,19 +143,20 @@ def convert_text_data(text_data: dict[list[str]]) -> tuple[np.ndarray, np.ndarra
     return np.array(x), np.array(y)
 
 
-def train_and_run_LSTM_model(audio_data: dict[list[float]]) -> None:
-    data = split_sequence(audio_data, SEQUENCE_LENGTH)
+def train_and_run_LSTM_model(train_data: dict[list[str]]) -> None:
+    data = split_sequence(train_data, SEQUENCE_LENGTH)
     x, y = convert_audio_data(data, SEQUENCE_LENGTH)
 
-    train_x, test_x, train_y, test_y = train_test_split(x, y, train_size=0.8)
+    train_x, test_x, train_y, test_y = train_test_split(x, y, train_size=0.8, random_state=RANDOM_STATE)
 
     lstm_model = LSTM()
     lstm_model.train_model(train_x, train_y, test_x, test_y, steps_per_epoch=len(train_y) // BATCH_SIZE, batch_size=BATCH_SIZE, output_file=MODEL_PATH, epochs=EPOCHS)
     lstm_model.evaluate(test_x, test_y)
 
 
-def train_and_run_LSTM_model_kfold(audio_data: dict[list[float]]) -> None:
-    x, y = convert_audio_data(audio_data)
+def train_and_run_LSTM_model_kfold(train_data: dict[list[str]]) -> None:
+    data = split_sequence(train_data, SEQUENCE_LENGTH)
+    x, y = convert_audio_data(data, SEQUENCE_LENGTH)
 
     kfold = StratifiedKFold(5)
 
@@ -161,20 +192,6 @@ def train_and_run_lexicon_model_kfold(text_data: dict[list[str]]) -> None:
     print(np.sum(accuracies) / 5)
 
 
-def split_sequence(audio_data: dict[list[float]], sequence_length: int) -> dict[list[float]]:
-    sequence_data = dict()
-    for (author, data) in audio_data.items():
-        sequences = list()
-        for clip in data:
-            i = 0
-            while i + sequence_length < len(clip[0]):
-                sequences.append(clip[0][i:i + sequence_length])
-                i += sequence_length
-        sequence_data[author] = sequences
-
-    return sequence_data
-
-
 def main():
     print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
     for gpu in tf.config.list_physical_devices('GPU'):
@@ -188,13 +205,23 @@ def main():
     # print(audio_data)
     # text_data = read_saved_text()
 
+    random.seed(RANDOM_STATE)
+    train_indexes = {author: random.sample([x for x in range(len(val))], int(len(val) * 0.8)) for (author, val) in audio_data.items()}
+
+    train_data = {}
+    validation_data = {}
+    for (author, data) in audio_data.items():
+        train_data[author] = [data[i] for i in train_indexes[author]]
+        validation_data[author] = [data[i] for i in set.difference(set(range(len(data))), set(train_indexes[author]))]
+
     # train_and_run_lexicon_model_kfold(text_data)
-    train_and_run_LSTM_model(audio_data)
+    train_and_run_LSTM_model(train_data)
     # train_and_run_LSTM_model_kfold(audio_data)
 
     # lstm = LSTM(MODEL_PATH)
-    # x, y = convert_audio_data(audio_data)
-    # lstm.evaluate(x, y)
+    # data = split_sequence(audio_data, SEQUENCE_LENGTH)
+    # x, y = convert_audio_data(data, SEQUENCE_LENGTH)
+    # lstm.evaluate(x, y, BATCH_SIZE)
 
 
 if __name__ == '__main__':

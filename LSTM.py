@@ -5,12 +5,14 @@ import keras.layers as layers
 import numpy as np
 import tensorflow as tf
 import torch
+from keras.callbacks import EarlyStopping, ModelCheckpoint
 
 
 def read_model(model_file: str = None):
     if model_file is None:
         return None
     return keras.models.load_model(model_file)
+
 
 class LSTM:
     def __init__(self, model_file: str = None) -> None:
@@ -33,6 +35,10 @@ class LSTM:
         model.add(layers.Dense(train_y.shape[1], activation="softmax"))
         model.compile(optimizer='adam',  loss="categorical_crossentropy", metrics=["accuracy"])
 
+        early_stopping = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=2)
+        if output_file is not None:
+            model_checkpoint = ModelCheckpoint(output_file, monitor='val_loss', mode='min', save_best_only=True)
+
         model.fit(train_x, train_y,
                   batch_size=batch_size,
                   validation_data=(test_x, test_y),
@@ -40,10 +46,8 @@ class LSTM:
                   epochs=epochs,
                   steps_per_epoch=steps_per_epoch,
                   verbose=1,
-                  use_multiprocessing=True)
-
-        if output_file is not None:
-            model.save(output_file)
+                  use_multiprocessing=True,
+                  callbacks=[early_stopping, model_checkpoint])
 
         self.model = model
 
