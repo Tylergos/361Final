@@ -33,15 +33,11 @@ class Similarity:
     def evaluate(self, test_x: np.ndarray, test_y: np.ndarray):
         predictions = []
         count = 0
-        num = 1
-        total = test_y.shape[0]
         for (text, author) in zip(test_x, test_y):
             pred = self.classify(text)
             predictions.append(pred)
             if pred == author:
                 count += 1
-            print("Done classifying " + str(num) + " out of " + str(total))
-            num += 1
         return count / test_y.shape[0], np.array(predictions)
 
     def classify(self, test_instance: str) -> str:
@@ -54,9 +50,8 @@ class Similarity:
 
         for token in test_tokens:
             if token not in test_set:
-                if token in self.unique_words:
-                    test_set.add(token)
-                    test_dict[token] = 1
+                test_set.add(token)
+                test_dict[token] = 1
 
         author: str
         vocab: dict
