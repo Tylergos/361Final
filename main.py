@@ -248,7 +248,6 @@ def sample_distribution(text_data: dict[list[str]]) -> None:
     plt.title("Text Sample Distribution Per Author")
     plt.show()
 
-    accuracies = []
 
 def text_extend_and_split(text_data, samples_per_clip):
     # Combine all the text for an author together and then split into SAMPLES_PER_CLIP number of different samples to
@@ -264,7 +263,6 @@ def text_extend_and_split(text_data, samples_per_clip):
         text_data[author] = combined_text
         text_split(text_data, samples_per_clip * num_clips, author, combined_text)
 
-        print("Fold Done")
 
 def text_split(text_data, num_splits, author, author_text):
     # Splits the data into a certain number of splits. If the last split is not full, ignore it
@@ -292,6 +290,7 @@ def main():
     print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
     for gpu in tf.config.list_physical_devices('GPU'):
         tf.config.experimental.set_memory_growth(gpu, True)
+
     # Running these will overwrite current data, ensure that you mean to do so before running it
     # read_and_save_audio()
     # speech_to_text(quick_run=True)
