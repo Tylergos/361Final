@@ -12,7 +12,7 @@ import pickle
 import speech_recognition as sr
 import nltk
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 import tensorflow as tf
 
 from Lexicon import Lexicon
@@ -44,7 +44,7 @@ def read_and_save_audio(file_name: str = PICKLE_AUDIO_FILE_PATH) -> None:
             print(audio_file)
             # open and resample the files from ~22Khz to ~11KHz.
             try:
-                audio_files.append(librosa.load(DATASET_PATH + "/" + speaker + "/" + audio_file, sr=SAMPLE_RATE))
+                audio_files.append(librosa.load(DATASET_PATH + "/" + speaker + "/" + audio_file, sr=SAMPLE_RATE)[0])
             except:
                 print("File failed to resample: " + audio_file)
         speaker_files[speaker] = audio_files
@@ -125,7 +125,7 @@ def read_saved_text(file_name: str = PICKLE_TEXT_FILE_PATH) -> dict[list[str]]:
     return text_data
 
 
-def convert_audio_data(audio_data: dict[list[str]], clip_length: int) -> tuple[np.ndarray, np.ndarray]:
+def convert_audio_data(audio_data: dict[list[float]], clip_length: int = CLIP_LENGTH) -> tuple[np.ndarray, np.ndarray]:
     # Convert the audio data to be in a format that keras model can read easier
     x = []
     y = []
@@ -143,19 +143,27 @@ def convert_audio_data(audio_data: dict[list[str]], clip_length: int) -> tuple[n
     return x, y
 
 
-def split_sequence(audio_data: dict[list[float]], sequence_length: int) -> dict[list[float]]:
+def split_sequence(audio_data: dict[list[float]], sequence_length: int, keep_partial_splits: bool = False) -> dict[list[float]]:
     # Splits the audio data into smaller samples
     sequence_data = dict()
     for (author, data) in audio_data.items():
         sequences = list()
         for clip in data:
             i = 0
-            while i + sequence_length < len(clip[0]):
-                sequences.append(clip[0][i:i + sequence_length])
+            while i + (sequence_length if not keep_partial_splits else 0) < len(clip):
+                sequences.append(clip[i:i + sequence_length])
                 i += sequence_length
-        sequence_data[author] = sequences
+        sequence_data[author] = pad_sequences(sequences, maxlen=sequence_length, dtype=float)
 
     return sequence_data
+
+
+def extend_sequence(audio_data: dict[list[float]], sequence_length: int) -> dict[list[float]]:
+    # Combine all the audio data for an author for easier splitting 
+    combined_audio_data = dict()
+    for (author, data) in audio_data.items():
+        combined_audio_data[author] = [np.hstack(data)]
+    return split_sequence(combined_audio_data, sequence_length, keep_partial_splits=True)
 
 
 def convert_text_data(text_data: dict[list[str]]) -> tuple[np.ndarray, np.ndarray]:
@@ -171,16 +179,16 @@ def convert_text_data(text_data: dict[list[str]]) -> tuple[np.ndarray, np.ndarra
     return np.array(x), np.array(y)
 
 
-def train_and_run_LSTM_model(train_data: dict[list[str]]) -> None:
+def train_and_run_LSTM_model(train_data: dict[list[str]], model_file: str = MODEL_PATH, continue_training: bool = False) -> None:
     # Makes, trains, and evaluates the LSTM model
     data = split_sequence(train_data, SEQUENCE_LENGTH)
     x, y = convert_audio_data(data, SEQUENCE_LENGTH)
 
     train_x, test_x, train_y, test_y = train_test_split(x, y, train_size=0.8, random_state=RANDOM_STATE)
 
-    lstm_model = LSTM()
+    lstm_model = LSTM(model_file if continue_training else None)
     lstm_model.train_model(train_x, train_y, test_x, test_y, steps_per_epoch=len(train_y) // BATCH_SIZE,
-                           batch_size=BATCH_SIZE, output_file=MODEL_PATH, epochs=EPOCHS)
+                           batch_size=BATCH_SIZE, output_file=model_file, epochs=EPOCHS)
     lstm_model.evaluate(test_x, test_y)
 
 
@@ -198,14 +206,7 @@ def train_and_run_lexicon_model(train_data: dict[list[str]], test_data: dict[lis
 
     lexicon_model = Lexicon(train_x, train_y)
     accuracy, predictions = lexicon_model.evaluate(test_x, test_y)
-    print("Accuracy")
-    print(accuracy)
-    print("Recall")
-    print(recall_score(y_true=test_y, y_pred=predictions, average="macro"))
-    print("Precision")
-    print(precision_score(y_true=test_y, y_pred=predictions, average="macro"))
-    print("F1-Score")
-    print(f1_score(y_true=test_y, y_pred=predictions, average="macro"))
+    print_statistics(y_true=test_y, y_pred=predictions)
     return predictions
 
 
@@ -223,14 +224,7 @@ def train_and_run_similarity_model(train_data: dict[list[str]], test_data: dict[
 
     similarity_model = Similarity(train_x, train_y)
     accuracy, predictions = similarity_model.evaluate(test_x, test_y)
-    print("Accuracy")
-    print(accuracy)
-    print("Recall")
-    print(recall_score(y_true=test_y, y_pred=predictions, average="macro"))
-    print("Precision")
-    print(precision_score(y_true=test_y, y_pred=predictions, average="macro"))
-    print("F1-Score")
-    print(f1_score(y_true=test_y, y_pred=predictions, average="macro"))
+    print_statistics(y_true=test_y, y_pred=predictions)
     return predictions
 
 
@@ -286,6 +280,20 @@ def text_split(text_data, num_splits, author, author_text):
                 break
 
 
+def print_statistics(y_true, y_pred):
+    y_pred = np.argmax(y_pred, axis=1)
+    y_true = np.argmax(y_true, axis=1)
+
+    accuracy = accuracy_score(y_true, y_pred)
+    recall = recall_score(y_true, y_pred, average="macro")
+    precision = precision_score(y_true, y_pred, average="macro")
+    f1 = f1_score(y_true, y_pred, average="macro")
+    print("Accuracy Score: " + str(accuracy))
+    print("Recall Score: " + str(recall))
+    print("Precision Score: " + str(precision))
+    print("F1 Score: " + str(f1))
+
+
 def main():
     print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
     for gpu in tf.config.list_physical_devices('GPU'):
@@ -308,17 +316,22 @@ def main():
     print("Lexicon")
     train_and_run_lexicon_model(train_text_data, validation_text_data, full=True)
 
-
     print("Similarity")
     train_and_run_similarity_model(train_text_data, validation_text_data, full=True)
     train_and_run_LSTM_model(train_audio_data)
+    
+    # This function is only for when the LSTM needed to stop training but was saved for further training
+    # train_and_run_LSTM_model(train_audio_data, model_file=MODEL_PATH, continue_training=True)
 
     sample_distribution(text_data)
 
     lstm = LSTM(MODEL_PATH)
-    data = split_sequence(validation_audio_data, SEQUENCE_LENGTH)
-    x, y = convert_audio_data(data, SEQUENCE_LENGTH)
-    lstm.evaluate(x, y, BATCH_SIZE)
+    validation_audio_data = split_sequence(validation_audio_data, SEQUENCE_LENGTH * 5)
+    validation_audio_data = extend_sequence(validation_audio_data, CLIP_LENGTH * 3)
+    x, y = convert_audio_data(validation_audio_data, CLIP_LENGTH * 3)
+    # predictions = lstm.predict(x, batch_size=BATCH_SIZE)
+    predictions = lstm.predict_long(x)
+    print_statistics(y, predictions)
 
 
 if __name__ == '__main__':
